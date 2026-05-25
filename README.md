@@ -50,6 +50,8 @@
 	<br/><br/>
 	<img src="./static/NotificationRules.png" width="100%" alt="NotificationRules" />
 	<br/><br/>
+	<img src="./static/DeviceStatusRule.png" width="100%" alt="DeviceStatusRule" />
+	<br/><br/>
 	<img src="./static/NotificationChannels.png" width="100%" alt="NotificationChannels" />
 	<br/><br/>
 	<img src="./static/Basic_Configuration.png" width="100%" alt="Basic_Configuration" />
@@ -435,6 +437,15 @@ journalctl -u simadmin -f
 - 短信通知模板新增 `{{验证码}}` 变量，可按需嵌入转发规则使用，原有默认模板保持不变。
 - 后端新增专属验证码识别提取器，结合数字位数、位置权重、关键词关联、格式特征及干扰词剔除等规则进行加权识别智能解析验证码。
 - 适配中英文主流验证码短信格式，可识别带短横线分隔的验证码，并自动规整为纯数字格式。
+- 通知中心新增设备状态定时报表，支持定点或间隔周期推送，兼容现有通知规则、推送通道、转发日志及免打扰机制。
+- 报表支持各项状态指标单独启停监控，涵盖网络连接、蜂窝状态、系统运行、流量使用、短信转发统计、OTA 更新等设备核心信息。
+- 短信转发统计支持今日、最近 24 小时、最近 7 天和累计统计周期，优先展示接收、成功、失败关键数据，自动隐藏无数据空值项。
+
+#### 💫 体验优化
+
+- 设备状态数据采用懒加载采集策略，仅读取已开启指标数据，减少无效系统调用，节约系统资源。
+- 后端统一处理温度传感器名称映射，报表与仪表盘统一展示中文友好名称。
+- 设备状态报表模板支持分类段落排版，规整内容层级结构，条理更清晰，方便查阅各类设备指标信息。
 
 ### 📌 v1.0.8
 

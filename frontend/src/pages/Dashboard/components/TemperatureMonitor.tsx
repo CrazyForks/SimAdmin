@@ -40,7 +40,7 @@ export function TemperatureMonitor({ systemStats }: TemperatureMonitorProps) {
                     noWrap
                     sx={{ minWidth: 0, flex: '1 1 auto', fontSize: '0.82rem' }}
                   >
-                    {sensor.type}
+                    {sensor.label || sensor.type}
                   </Typography>
                   <Box display="flex" alignItems="center" gap={1.25} sx={{ flex: '0 0 auto' }}>
                     <Box

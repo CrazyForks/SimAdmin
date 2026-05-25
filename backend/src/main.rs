@@ -29,6 +29,7 @@ mod cell_lock_store;
 mod config;
 mod db;
 mod device_network;
+mod device_status;
 mod esim;
 mod handlers;
 mod iptables;
@@ -339,6 +340,13 @@ async fn main() -> Result<()> {
     system_event_monitor::spawn_system_event_monitor(
         Arc::clone(&system_event_emitter),
         Arc::clone(&dbus_conn),
+    );
+    device_status::spawn_device_status_scheduler(
+        Arc::clone(&config_manager),
+        Arc::clone(&notification_sender),
+        Arc::clone(&app_db),
+        Arc::clone(&dbus_conn),
+        Arc::clone(&ddns_manager),
     );
 
     {

@@ -268,6 +268,7 @@ pub struct ThermalZone {
     pub zone: String,
     #[serde(rename = "type")]
     pub sensor_type: String,
+    pub label: String,
     pub temperature: f64,
 }
 

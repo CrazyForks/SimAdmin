@@ -243,6 +243,7 @@ pub enum NotificationEventType {
     Ddns,
     VersionUpdate,
     SystemEvent,
+    DeviceStatus,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -300,6 +301,91 @@ fn default_quiet_end() -> String {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct DeviceStatusSchedule {
+    #[serde(default = "default_device_status_schedule_mode")]
+    pub mode: String,
+    #[serde(default = "default_device_status_interval_minutes")]
+    pub interval_minutes: u32,
+    #[serde(default = "default_device_status_weekdays")]
+    pub weekdays: Vec<u8>,
+    #[serde(default = "default_device_status_times")]
+    pub times: Vec<String>,
+}
+
+impl Default for DeviceStatusSchedule {
+    fn default() -> Self {
+        Self {
+            mode: default_device_status_schedule_mode(),
+            interval_minutes: default_device_status_interval_minutes(),
+            weekdays: default_device_status_weekdays(),
+            times: default_device_status_times(),
+        }
+    }
+}
+
+fn default_device_status_schedule_mode() -> String {
+    "fixed".to_string()
+}
+
+fn default_device_status_interval_minutes() -> u32 {
+    24 * 60
+}
+
+fn default_device_status_weekdays() -> Vec<u8> {
+    vec![1, 2, 3, 4, 5, 6, 7]
+}
+
+fn default_device_status_times() -> Vec<String> {
+    vec!["09:00".to_string()]
+}
+
+fn default_device_status_sms_period() -> String {
+    "last_24h".to_string()
+}
+
+pub fn default_device_status_items() -> Vec<String> {
+    [
+        "device_power",
+        "device_model",
+        "system_version",
+        "uptime",
+        "work_mode",
+        "sim_present",
+        "sim_operator",
+        "cellular_registration",
+        "cellular_operator",
+        "cellular_technology",
+        "signal_strength",
+        "data_connection",
+        "airplane_mode",
+        "roaming",
+        "ipv4_connectivity",
+        "ipv6_connectivity",
+        "default_route",
+        "default_ip",
+        "wlan_enabled",
+        "wlan_connected",
+        "wlan_ssid",
+        "key_interfaces",
+        "cellular_traffic",
+        "cpu_usage",
+        "memory_usage",
+        "root_disk",
+        "top_temperatures",
+        "service_version",
+        "ddns_status",
+        "ota_status",
+        "forwarding_channels",
+        "forwarding_rules",
+        "sms_forwarding_stats",
+    ]
+    .into_iter()
+    .map(ToString::to_string)
+    .collect()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NotificationRule {
     pub id: String,
     #[serde(rename = "type")]
@@ -319,6 +405,12 @@ pub struct NotificationRule {
     pub quiet_hours: Vec<QuietHoursSchedule>,
     #[serde(default = "default_ddns_failure_threshold")]
     pub ddns_failure_threshold: u32,
+    #[serde(default = "default_device_status_items")]
+    pub device_status_items: Vec<String>,
+    #[serde(default)]
+    pub device_status_schedule: DeviceStatusSchedule,
+    #[serde(default = "default_device_status_sms_period")]
+    pub device_status_sms_period: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -983,6 +1075,7 @@ fn push_legacy_rule(
             NotificationEventType::Ddns => channel.forward_ddns,
             NotificationEventType::VersionUpdate => channel.forward_updates,
             NotificationEventType::SystemEvent => false,
+            NotificationEventType::DeviceStatus => false,
         })
         .collect::<Vec<_>>();
     if selected.is_empty() {
@@ -996,6 +1089,7 @@ fn push_legacy_rule(
             NotificationEventType::Ddns => channel.ddns_template.clone(),
             NotificationEventType::VersionUpdate => channel.update_template.clone(),
             NotificationEventType::SystemEvent => String::new(),
+            NotificationEventType::DeviceStatus => String::new(),
         })
         .unwrap_or_else(|| default_rule_template(event_type));
 
@@ -1013,6 +1107,9 @@ fn push_legacy_rule(
         template,
         quiet_hours: Vec::new(),
         ddns_failure_threshold: default_ddns_failure_threshold(),
+        device_status_items: default_device_status_items(),
+        device_status_schedule: DeviceStatusSchedule::default(),
+        device_status_sms_period: default_device_status_sms_period(),
     });
 }
 
@@ -1056,6 +1153,9 @@ pub fn default_rule_template(event_type: NotificationEventType) -> String {
         }
         NotificationEventType::SystemEvent => {
             "系统事件通知\n分类: {{分类}}\n事件: {{事件}}\n等级: {{等级}}\n状态: {{状态}}\n对象: {{对象}}\n消息: {{消息}}\n时间: {{时间}}".to_string()
+        }
+        NotificationEventType::DeviceStatus => {
+            "设备状态报告\n【{{状态分类}}】\n{{状态内容}}\n\n时间: {{时间}}".to_string()
         }
     }
 }

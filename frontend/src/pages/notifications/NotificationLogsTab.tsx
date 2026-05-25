@@ -67,6 +67,7 @@ const filterTextFieldSx = {
 }
 
 const WEEKDAY_LABELS = ['一', '二', '三', '四', '五', '六', '日']
+const EXPANDABLE_EVENT_TYPES = new Set(['system_event', 'device_status'])
 const DATE_RANGE_BUTTON_SX = {
   height: 40,
   minWidth: 260,
@@ -126,6 +127,14 @@ function logSummaryText(log: NotificationLogEntry) {
   if (log.status === 'unmatched' && log.message) return `${log.summary}\n未匹配规则原因：${log.message}`
   if (log.status === 'no_available_channel' && log.message) return `${log.summary}；无可用通道原因：${log.message}`
   return log.summary
+}
+
+function logSummaryLines(text: string) {
+  return text.replace(/\r\n/g, '\n').split('\n')
+}
+
+function collapsedSummaryText(lines: string[]) {
+  return `${lines.slice(0, 2).join('\n')}${lines.length > 1 ? '\n' : ''}${lines[2] ?? ''}`
 }
 
 type NotificationLogClearFilters = {
@@ -349,6 +358,7 @@ export default function NotificationLogsTab({
   const [autoRetentionDays, setAutoRetentionDays] = useState(String(logCleanup.retention_days))
   const [autoMaxEntriesEnabled, setAutoMaxEntriesEnabled] = useState(logCleanup.max_entries_enabled)
   const [autoMaxEntries, setAutoMaxEntries] = useState(String(logCleanup.max_entries))
+  const [expandedLogIds, setExpandedLogIds] = useState<Set<number>>(() => new Set())
 
   useEffect(() => {
     setPageInput(String(logPage + 1))
@@ -370,6 +380,18 @@ export default function NotificationLogsTab({
       event.currentTarget.blur()
       commitPageInput()
     }
+  }
+
+  const toggleExpandedLog = (logId: number) => {
+    setExpandedLogIds((current) => {
+      const next = new Set(current)
+      if (next.has(logId)) {
+        next.delete(logId)
+      } else {
+        next.add(logId)
+      }
+      return next
+    })
   }
 
   const openClearDialog = () => {
@@ -474,6 +496,12 @@ export default function NotificationLogsTab({
             <TableBody>
               {logs.map((log) => {
                 const summaryText = logSummaryText(log)
+                const summaryLines = logSummaryLines(summaryText)
+                const canExpandSummary = EXPANDABLE_EVENT_TYPES.has(log.event_type) && summaryLines.length > 3
+                const expanded = expandedLogIds.has(log.id)
+                const visibleSummary = canExpandSummary && !expanded
+                  ? collapsedSummaryText(summaryLines)
+                  : summaryText
                 return (
                   <TableRow key={log.id} sx={{ height: 40, '& .MuiTableCell-root': { py: 0.5 } }}>
                   <TableCell sx={{ width: 150, whiteSpace: 'nowrap', fontWeight: 400 }}>{log.created_at}</TableCell>
@@ -493,7 +521,26 @@ export default function NotificationLogsTab({
                   >
                     {statusLabel(log.status)}
                   </TableCell>
-                  <TableCell sx={{ fontWeight: 400, whiteSpace: 'pre-line' }} title={summaryText}>{summaryText}</TableCell>
+                  <TableCell sx={{ fontWeight: 400, whiteSpace: 'pre-line' }} title={summaryText}>
+                    {visibleSummary}
+                    {canExpandSummary && (
+                      <Button
+                        size="small"
+                        variant="text"
+                        onClick={() => toggleExpandedLog(log.id)}
+                        sx={{
+                          display: expanded ? 'block' : 'inline',
+                          minWidth: 0,
+                          mt: expanded ? 0.25 : 0,
+                          p: 0,
+                          fontWeight: 400,
+                          verticalAlign: 'baseline',
+                        }}
+                      >
+                        {expanded ? '收起' : ' ...查看更多'}
+                      </Button>
+                    )}
+                  </TableCell>
                   <TableCell sx={{ fontWeight: 400 }}>{log.rule_name || '-'}</TableCell>
                   <TableCell sx={{ fontWeight: 400 }}>{log.channel_name || '-'}</TableCell>
                   </TableRow>

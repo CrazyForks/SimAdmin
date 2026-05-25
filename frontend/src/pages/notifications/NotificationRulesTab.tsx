@@ -24,7 +24,7 @@ import {
   useMediaQuery,
 } from '@mui/material'
 import { alpha, type Theme } from '@mui/material/styles'
-import { Add, DeleteOutline, Dns, ExpandMore, NotificationsActive, Save, Sms, SystemUpdateAlt } from '@mui/icons-material'
+import { Add, DeleteOutline, Dns, ExpandMore, NotificationsActive, QueryStats, Save, Sms, SystemUpdateAlt } from '@mui/icons-material'
 import type {
   MatcherOperator,
   NotificationConfig,
@@ -42,12 +42,14 @@ import {
   eventLabel,
 } from './notificationModel'
 import SystemEventRuleEditor from './SystemEventRuleEditor'
+import DeviceStatusRuleEditor from './DeviceStatusRuleEditor'
 
 const EVENT_ICONS: Record<NotificationEventType, typeof Sms> = {
   sms: Sms,
   ddns: Dns,
   version_update: SystemUpdateAlt,
   system_event: NotificationsActive,
+  device_status: QueryStats,
 }
 
 type NotificationRulesTabProps = {
@@ -272,9 +274,9 @@ export default function NotificationRulesTab({
                   </Box>
                 </AccordionSummary>
                 <AccordionDetails>
-                  <Box display="grid" gridTemplateColumns={{ xs: '1fr', md: rule.type === 'system_event' ? '1fr' : '1fr 1fr' }} gap={2}>
+                  <Box display="grid" gridTemplateColumns={{ xs: '1fr', md: rule.type === 'system_event' || rule.type === 'device_status' ? '1fr' : '1fr 1fr' }} gap={2}>
                     <TextField label="规则名称" value={rule.name} onChange={(event: ChangeEvent<HTMLInputElement>) => onPatchRule(rule.id, { name: event.target.value })} />
-                    {rule.type !== 'system_event' && (
+                    {rule.type !== 'system_event' && rule.type !== 'device_status' && (
                       <>
                         <TextField
                           select
@@ -342,6 +344,17 @@ export default function NotificationRulesTab({
                     <SystemEventRuleEditor
                       eventCodes={rule.event_codes ?? []}
                       onChange={(eventCodes) => onPatchRule(rule.id, { event_codes: eventCodes })}
+                    />
+                  )}
+
+                  {rule.type === 'device_status' && (
+                    <DeviceStatusRuleEditor
+                      items={rule.device_status_items ?? []}
+                      schedule={rule.device_status_schedule}
+                      smsPeriod={rule.device_status_sms_period}
+                      onItemsChange={(items) => onPatchRule(rule.id, { device_status_items: items })}
+                      onScheduleChange={(schedule) => onPatchRule(rule.id, { device_status_schedule: schedule })}
+                      onSmsPeriodChange={(period) => onPatchRule(rule.id, { device_status_sms_period: period as NotificationRule['device_status_sms_period'] })}
                     />
                   )}
 

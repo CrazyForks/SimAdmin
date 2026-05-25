@@ -99,6 +99,7 @@ function getTempDotColor(sensor: ThermalZone | null) {
 }
 
 function getFriendlyTemperatureLabel(sensor: ThermalZone) {
+  if (sensor.label?.trim()) return sensor.label.trim()
   const rawType = sensor.type.trim()
   const source = rawType || sensor.zone || 'unknown'
   const normalized = source.toLowerCase().replace(/_/g, '-')

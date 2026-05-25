@@ -67,6 +67,21 @@ pub struct NotificationLogsResponse {
     pub total: i64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct NotificationStatusCounts {
+    pub success: i64,
+    pub failed: i64,
+    pub quiet_hours: i64,
+    pub unmatched: i64,
+    pub no_available_channel: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PeriodSmsStats {
+    pub incoming: i64,
+    pub forwarding: NotificationStatusCounts,
+}
+
 pub struct NewNotificationLog<'a> {
     pub event_type: &'a str,
     pub status: &'a str,
@@ -872,6 +887,57 @@ impl Database {
         }
 
         Ok(deleted)
+    }
+
+    pub fn notification_status_counts(
+        &self,
+        event_type: &str,
+        since: Option<&str>,
+    ) -> Result<NotificationStatusCounts> {
+        let conn = self.conn.lock().unwrap();
+        let mut counts = NotificationStatusCounts::default();
+        let since = since.unwrap_or("").trim();
+        let mut stmt = conn.prepare(
+            "SELECT status, COUNT(*)
+             FROM notification_logs
+             WHERE event_type = ?1
+               AND (?2 = '' OR created_at >= ?2)
+             GROUP BY status",
+        )?;
+        let rows = stmt.query_map(params![event_type, since], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })?;
+        for row in rows {
+            let (status, count) = row?;
+            match status.as_str() {
+                "success" => counts.success = count,
+                "failed" => counts.failed = count,
+                "quiet_hours" => counts.quiet_hours = count,
+                "unmatched" => counts.unmatched = count,
+                "no_available_channel" => counts.no_available_channel = count,
+                _ => {}
+            }
+        }
+        Ok(counts)
+    }
+
+    pub fn period_sms_stats(&self, since: Option<&str>) -> Result<PeriodSmsStats> {
+        let conn = self.conn.lock().unwrap();
+        let since = since.unwrap_or("").trim();
+        let incoming: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sms_messages
+             WHERE direction = 'incoming'
+               AND status = 'received'
+               AND (?1 = '' OR timestamp >= ?1)",
+            params![since],
+            |row| row.get(0),
+        )?;
+        drop(conn);
+        let forwarding = self.notification_status_counts("sms", Some(since))?;
+        Ok(PeriodSmsStats {
+            incoming,
+            forwarding,
+        })
     }
 
     pub fn get_sms_stats(&self) -> Result<SmsStats> {

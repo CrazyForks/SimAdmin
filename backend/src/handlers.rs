@@ -2476,7 +2476,155 @@ pub async fn get_voicemail_status_handler() -> impl IntoResponse {
     )
 }
 
-fn read_temperature_sensors() -> Vec<ThermalZone> {
+pub(crate) fn temperature_sensor_label(sensor_type: &str, zone: &str) -> String {
+    let source = if sensor_type.trim().is_empty() {
+        if zone.trim().is_empty() {
+            "unknown"
+        } else {
+            zone.trim()
+        }
+    } else {
+        sensor_type.trim()
+    };
+    let normalized = source.to_ascii_lowercase().replace('_', "-");
+
+    if ["modem", "baseband", "wwan", "qmi", "mhi"]
+        .iter()
+        .any(|pattern| normalized.contains(pattern))
+    {
+        return "基带".to_string();
+    }
+    if ["gpu", "adreno"]
+        .iter()
+        .any(|pattern| normalized.contains(pattern))
+    {
+        return "GPU".to_string();
+    }
+    if ["camera", "cam", "isp"]
+        .iter()
+        .any(|pattern| normalized.contains(pattern))
+    {
+        return "摄像头".to_string();
+    }
+    if ["wifi", "wlan"]
+        .iter()
+        .any(|pattern| normalized.contains(pattern))
+    {
+        return "Wi-Fi".to_string();
+    }
+    if ["battery", "batt"]
+        .iter()
+        .any(|pattern| normalized.contains(pattern))
+    {
+        return "电池".to_string();
+    }
+    if ["charger", "charge"]
+        .iter()
+        .any(|pattern| normalized.contains(pattern))
+    {
+        return "充电".to_string();
+    }
+    if ["pmic", "power"]
+        .iter()
+        .any(|pattern| normalized.contains(pattern))
+    {
+        return "电源管理".to_string();
+    }
+    if ["soc", "tsens"]
+        .iter()
+        .any(|pattern| normalized.contains(pattern))
+    {
+        return "SoC".to_string();
+    }
+    if ["skin", "shell", "case"]
+        .iter()
+        .any(|pattern| normalized.contains(pattern))
+    {
+        return "外壳".to_string();
+    }
+    if ["ambient", "board"]
+        .iter()
+        .any(|pattern| normalized.contains(pattern))
+    {
+        return "环境".to_string();
+    }
+
+    if let Some((first, second)) = extract_number_range_after(&normalized, "cpu") {
+        return second
+            .map(|second| format!("CPU {first}-{second}"))
+            .unwrap_or_else(|| format!("CPU {first}"));
+    }
+    if normalized.contains("cpu") {
+        return "CPU".to_string();
+    }
+
+    if let Some((first, second)) = extract_number_range_after(&normalized, "core") {
+        return second
+            .map(|second| format!("核心 {first}-{second}"))
+            .unwrap_or_else(|| format!("核心 {first}"));
+    }
+    if normalized.contains("core") {
+        return "核心".to_string();
+    }
+
+    let cleaned = source
+        .replace(|ch: char| matches!(ch, '-' | '_' | ' '), " ")
+        .split_whitespace()
+        .filter(|part| {
+            !matches!(
+                part.to_ascii_lowercase().as_str(),
+                "thermal" | "therm" | "temperature" | "temp" | "sensor" | "zone"
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    if cleaned.is_empty() {
+        source.to_string()
+    } else {
+        cleaned
+    }
+}
+
+fn extract_number_range_after(value: &str, prefix: &str) -> Option<(String, Option<String>)> {
+    let start = value.find(prefix)? + prefix.len();
+    let chars = value[start..].char_indices();
+    let mut first_start = None;
+    for (index, ch) in chars {
+        if ch.is_ascii_digit() {
+            first_start = Some(start + index);
+            break;
+        }
+    }
+    let first_start = first_start?;
+    let first_end = value[first_start..]
+        .char_indices()
+        .find_map(|(index, ch)| (!ch.is_ascii_digit()).then_some(first_start + index))
+        .unwrap_or(value.len());
+    let first = value[first_start..first_end].to_string();
+
+    let after_first = &value[first_end..];
+    let mut second_start = None;
+    for (index, ch) in after_first.char_indices() {
+        if ch.is_ascii_digit() {
+            second_start = Some(first_end + index);
+            break;
+        }
+        if ch.is_ascii_alphabetic() {
+            break;
+        }
+    }
+    let Some(second_start) = second_start else {
+        return Some((first, None));
+    };
+    let second_end = value[second_start..]
+        .char_indices()
+        .find_map(|(index, ch)| (!ch.is_ascii_digit()).then_some(second_start + index))
+        .unwrap_or(value.len());
+    Some((first, Some(value[second_start..second_end].to_string())))
+}
+
+pub(crate) fn read_temperature_sensors() -> Vec<ThermalZone> {
     use std::fs;
     use std::path::Path;
 
@@ -2499,9 +2647,11 @@ fn read_temperature_sensors() -> Vec<ThermalZone> {
                     .map(|t| t as f64 / 1000.0)
                     .unwrap_or(0.0);
 
+                let label = temperature_sensor_label(&sensor_type, &name);
                 sensors.push(ThermalZone {
                     zone: name.to_string(),
                     sensor_type,
+                    label,
                     temperature,
                 });
             }
@@ -2633,7 +2783,7 @@ pub async fn get_connectivity_check() -> (StatusCode, Json<ApiResponse<Connectiv
     )
 }
 
-async fn async_ping_host(target: &str, is_ipv6: bool) -> PingResult {
+pub(crate) async fn async_ping_host(target: &str, is_ipv6: bool) -> PingResult {
     let cmd = if is_ipv6 { "ping6" } else { "ping" };
     let output = tokio::process::Command::new(cmd)
         .args(["-c", "1", "-W", "1", target])
@@ -3282,5 +3432,13 @@ mod tests {
             split_profile_operator_code("46002"),
             ("460".to_string(), "02".to_string())
         );
+    }
+
+    #[test]
+    fn labels_temperature_sensors_with_dashboard_names() {
+        assert_eq!(temperature_sensor_label("modem-thermal", ""), "基带");
+        assert_eq!(temperature_sensor_label("cpu0-1-thermal", ""), "CPU 0-1");
+        assert_eq!(temperature_sensor_label("core2_3_temp", ""), "核心 2-3");
+        assert_eq!(temperature_sensor_label("wifi_sensor", ""), "Wi-Fi");
     }
 }

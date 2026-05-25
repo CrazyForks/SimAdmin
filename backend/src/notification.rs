@@ -6,6 +6,7 @@ use crate::config::{
     WecomRobotConfig,
 };
 use crate::db::{CallRecord, Database, SmsMessage};
+use crate::device_status::DeviceStatusReport;
 use crate::models::{DdnsEvent, VersionUpdateEvent};
 use crate::modem_manager::get_sim_info_data_with_cache;
 use crate::system_event::SystemEvent;
@@ -77,6 +78,7 @@ enum NotificationEvent<'a> {
     Ddns(&'a DdnsEvent),
     VersionUpdate(&'a VersionUpdateEvent),
     SystemEvent(&'a SystemEvent),
+    DeviceStatus(&'a DeviceStatusReport),
 }
 
 impl NotificationEvent<'_> {
@@ -86,6 +88,7 @@ impl NotificationEvent<'_> {
             NotificationEvent::Ddns(_) => NotificationEventType::Ddns,
             NotificationEvent::VersionUpdate(_) => NotificationEventType::VersionUpdate,
             NotificationEvent::SystemEvent(_) => NotificationEventType::SystemEvent,
+            NotificationEvent::DeviceStatus(_) => NotificationEventType::DeviceStatus,
         }
     }
 
@@ -97,6 +100,7 @@ impl NotificationEvent<'_> {
             NotificationEvent::SystemEvent(event) => {
                 format!("SimAdmin 系统事件 - {}", event.event_label)
             }
+            NotificationEvent::DeviceStatus(_) => "SimAdmin 设备状态".to_string(),
         }
     }
 
@@ -119,6 +123,7 @@ impl NotificationEvent<'_> {
                 "{} {} {}",
                 event.event_label, event.status_label, event.message
             )),
+            NotificationEvent::DeviceStatus(_) => "设备状态定时报表".to_string(),
         }
     }
 
@@ -167,6 +172,11 @@ impl NotificationEvent<'_> {
                 "message" => event.message.clone(),
                 _ => self.summary(),
             },
+            NotificationEvent::DeviceStatus(report) => match field {
+                "status_content" | "content" => report.text(),
+                "timestamp" => report.timestamp.clone(),
+                _ => self.summary(),
+            },
         }
     }
 
@@ -186,6 +196,9 @@ impl NotificationEvent<'_> {
             }
             NotificationEvent::SystemEvent(event) => {
                 render_system_event_template(&template, event, false)
+            }
+            NotificationEvent::DeviceStatus(report) => {
+                render_device_status_template(&template, report, false)
             }
         }
     }
@@ -345,6 +358,21 @@ impl NotificationSender {
         }
     }
 
+    pub async fn forward_device_status_report(
+        &self,
+        rule_id: &str,
+        report: &DeviceStatusReport,
+    ) -> Result<(), String> {
+        let event = NotificationEvent::DeviceStatus(report);
+        let result = self.route_event_for_rule(&event, Some(rule_id)).await;
+
+        if result.errors.is_empty() || result.delivered {
+            Ok(())
+        } else {
+            Err(result.errors.join("; "))
+        }
+    }
+
     /// Test a specific notification channel with a simulated SMS.
     pub async fn test_channel(&self, target: &str) -> Result<String, String> {
         let config = self.get_config();
@@ -374,16 +402,26 @@ impl NotificationSender {
     }
 
     async fn route_event(&self, event: &NotificationEvent<'_>) -> NotificationRouteResult {
+        self.route_event_for_rule(event, None).await
+    }
+
+    async fn route_event_for_rule(
+        &self,
+        event: &NotificationEvent<'_>,
+        target_rule_id: Option<&str>,
+    ) -> NotificationRouteResult {
         let config = self.get_config();
         let mut result = NotificationRouteResult::default();
         let summary = event.summary();
         let mut matched_rules = 0usize;
 
-        for rule in config
-            .rules
-            .iter()
-            .filter(|rule| rule.enabled && rule.event_type == event.event_type())
-        {
+        for rule in config.rules.iter().filter(|rule| {
+            rule.enabled
+                && rule.event_type == event.event_type()
+                && target_rule_id
+                    .map(|target| rule.id == target)
+                    .unwrap_or(true)
+        }) {
             if !rule_matches(rule, event) {
                 continue;
             }
@@ -393,11 +431,19 @@ impl NotificationSender {
                 continue;
             }
 
+            let text = event.render(&rule.template);
+            let log_summary = match event.event_type() {
+                NotificationEventType::SystemEvent | NotificationEventType::DeviceStatus => {
+                    text.as_str()
+                }
+                _ => summary.as_str(),
+            };
+
             if rule.channel_ids.is_empty() {
                 self.record_notification_log(
                     event.event_type(),
                     "no_available_channel",
-                    &summary,
+                    log_summary,
                     Some(rule),
                     None,
                     "规则未选择通知通道",
@@ -405,7 +451,6 @@ impl NotificationSender {
                 continue;
             }
 
-            let text = event.render(&rule.template);
             let quiet = quiet_hours_active(&rule.quiet_hours);
             for channel_id in &rule.channel_ids {
                 result.attempted = true;
@@ -414,7 +459,7 @@ impl NotificationSender {
                     self.record_notification_log(
                         event.event_type(),
                         "no_available_channel",
-                        &summary,
+                        log_summary,
                         Some(rule),
                         None,
                         "通知通道不存在",
@@ -426,7 +471,7 @@ impl NotificationSender {
                     self.record_notification_log(
                         event.event_type(),
                         "quiet_hours",
-                        &summary,
+                        log_summary,
                         Some(rule),
                         Some(channel),
                         "免打扰时间段内，已跳过发送",
@@ -438,7 +483,7 @@ impl NotificationSender {
                     self.record_notification_log(
                         event.event_type(),
                         "no_available_channel",
-                        &summary,
+                        log_summary,
                         Some(rule),
                         Some(channel),
                         "通知通道已停用",
@@ -453,7 +498,7 @@ impl NotificationSender {
                         self.record_notification_log(
                             event.event_type(),
                             "success",
-                            &summary,
+                            log_summary,
                             Some(rule),
                             Some(channel),
                             &message,
@@ -465,7 +510,7 @@ impl NotificationSender {
                         self.record_notification_log(
                             event.event_type(),
                             "failed",
-                            &summary,
+                            log_summary,
                             Some(rule),
                             Some(channel),
                             &err,
@@ -475,7 +520,10 @@ impl NotificationSender {
             }
         }
 
-        if matched_rules == 0 && event.event_type() != NotificationEventType::SystemEvent {
+        if matched_rules == 0
+            && event.event_type() != NotificationEventType::SystemEvent
+            && target_rule_id.is_none()
+        {
             self.record_notification_log(
                 event.event_type(),
                 "unmatched",
@@ -1821,7 +1869,7 @@ fn ddns_failure_threshold_pending(rule: &NotificationRule, event: &NotificationE
     failure_count == 0 || failure_count % threshold != 0
 }
 
-fn quiet_hours_active(schedules: &[QuietHoursSchedule]) -> bool {
+pub(crate) fn quiet_hours_active(schedules: &[QuietHoursSchedule]) -> bool {
     let now = Utc::now().with_timezone(&beijing_offset());
     let weekday = now.weekday().number_from_monday() as u8;
     let minutes = now.hour() as u16 * 60 + now.minute() as u16;
@@ -1873,6 +1921,7 @@ fn notification_event_type_key(event_type: NotificationEventType) -> &'static st
         NotificationEventType::Ddns => "ddns",
         NotificationEventType::VersionUpdate => "version_update",
         NotificationEventType::SystemEvent => "system_event",
+        NotificationEventType::DeviceStatus => "device_status",
     }
 }
 
@@ -2160,6 +2209,74 @@ fn render_system_event_template(template: &str, event: &SystemEvent, escape_json
         .replace("{{状态编码}}", &status)
         .replace("{{对象}}", &entity)
         .replace("{{消息}}", &message)
+        .replace("{{时间}}", &timestamp)
+}
+
+fn render_device_status_template(
+    template: &str,
+    report: &DeviceStatusReport,
+    escape_json: bool,
+) -> String {
+    let maybe_escape = |value: &str| {
+        if escape_json {
+            escape_json_string(value)
+        } else {
+            value.to_string()
+        }
+    };
+    let timestamp = maybe_escape(&report.timestamp);
+    if template.contains("{{状态分类}}") || template.contains("{{status_category}}") {
+        let category_token = template
+            .find("{{状态分类}}")
+            .or_else(|| template.find("{{status_category}}"));
+        let content_token = template
+            .find("{{状态内容}}")
+            .or_else(|| template.find("{{status_content}}"))
+            .or_else(|| template.find("{{content}}"));
+        if let (Some(category_index), Some(content_index)) = (category_token, content_token) {
+            let section_start = template[..category_index]
+                .rfind('\n')
+                .map(|index| index + 1)
+                .unwrap_or(0);
+            let section_end = template[content_index..]
+                .find('\n')
+                .map(|offset| content_index + offset + 1)
+                .unwrap_or(template.len());
+            let header = &template[..section_start];
+            let section_template = &template[section_start..section_end];
+            let footer = &template[section_end..];
+            let sections = report
+                .sections()
+                .into_iter()
+                .map(|section| {
+                    let category = maybe_escape(&section.category);
+                    let content = maybe_escape(&section.lines.join("\n"));
+                    section_template
+                        .replace("{{status_category}}", &category)
+                        .replace("{{状态分类}}", &category)
+                        .replace("{{status_content}}", &content)
+                        .replace("{{content}}", &content)
+                        .replace("{{状态内容}}", &content)
+                        .replace("{{timestamp}}", &timestamp)
+                        .replace("{{time}}", &timestamp)
+                        .replace("{{时间}}", &timestamp)
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            return format!("{header}{sections}{footer}")
+                .replace("{{timestamp}}", &timestamp)
+                .replace("{{time}}", &timestamp)
+                .replace("{{时间}}", &timestamp);
+        }
+    }
+
+    let content = maybe_escape(&report.text());
+    template
+        .replace("{{status_content}}", &content)
+        .replace("{{content}}", &content)
+        .replace("{{timestamp}}", &timestamp)
+        .replace("{{time}}", &timestamp)
+        .replace("{{状态内容}}", &content)
         .replace("{{时间}}", &timestamp)
 }
 
@@ -2520,6 +2637,9 @@ mod tests {
             template: String::new(),
             quiet_hours: Vec::new(),
             ddns_failure_threshold: 1,
+            device_status_items: crate::config::default_device_status_items(),
+            device_status_schedule: crate::config::DeviceStatusSchedule::default(),
+            device_status_sms_period: "last_24h".to_string(),
         };
         assert!(rule_matches(&contains_rule, &event));
 
@@ -2547,6 +2667,9 @@ mod tests {
             template: String::new(),
             quiet_hours: Vec::new(),
             ddns_failure_threshold: 5,
+            device_status_items: crate::config::default_device_status_items(),
+            device_status_schedule: crate::config::DeviceStatusSchedule::default(),
+            device_status_sms_period: "last_24h".to_string(),
         };
         let mut ddns = DdnsEvent {
             status: "failed".to_string(),

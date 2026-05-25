@@ -27,6 +27,11 @@ import {
   SYSTEM_EVENT_TEMPLATE_VARIABLES,
   defaultSystemEventCodes,
 } from './systemEventModel'
+import {
+  DEFAULT_DEVICE_STATUS_TEMPLATE,
+  DEVICE_STATUS_TEMPLATE_VARIABLES,
+  defaultDeviceStatusItems,
+} from './deviceStatusModel'
 
 export type IconComponent = ElementType<SvgIconProps>
 
@@ -65,6 +70,7 @@ export const EVENT_TYPES: { key: NotificationEventType; label: string }[] = [
   { key: 'ddns', label: 'DDNS' },
   { key: 'version_update', label: '版本更新' },
   { key: 'system_event', label: '系统事件' },
+  { key: 'device_status', label: '设备状态' },
 ]
 
 export const WEEKDAYS = [
@@ -109,6 +115,7 @@ export const MATCH_FIELDS: Record<NotificationEventType, { value: string; label:
     { value: 'commit', label: 'Commit' },
   ],
   system_event: [],
+  device_status: [],
 }
 
 export const DEFAULT_TEMPLATES: Record<NotificationEventType, string> = {
@@ -116,6 +123,7 @@ export const DEFAULT_TEMPLATES: Record<NotificationEventType, string> = {
   ddns: 'DDNS 通知\n域名: {{域名}}\nIP 类型: {{IP类型}}\n新 IP: {{新IP}}\n旧 IP: {{旧IP}}\n服务商: {{服务商}}\n记录类型: {{记录类型}}\n状态: {{状态}}\n消息: {{消息}}\n更新时间: {{更新时间}}',
   version_update: '发现新版本\n固件包: {{固件包}}\n版本号: {{版本号}}\nCommit: {{Commit}}\n构建时间: {{构建时间}}\nMD5: {{MD5}}',
   system_event: DEFAULT_SYSTEM_EVENT_TEMPLATE,
+  device_status: DEFAULT_DEVICE_STATUS_TEMPLATE,
 }
 
 export const TEMPLATE_VARIABLES: Record<NotificationEventType, TemplateVariable[]> = {
@@ -148,6 +156,7 @@ export const TEMPLATE_VARIABLES: Record<NotificationEventType, TemplateVariable[
     { label: 'MD5', token: '{{MD5}}' },
   ],
   system_event: SYSTEM_EVENT_TEMPLATE_VARIABLES,
+  device_status: DEVICE_STATUS_TEMPLATE_VARIABLES,
 }
 
 export function createDefaultConfig(): NotificationConfig {
@@ -159,6 +168,14 @@ function normalizeRule(rule: NotificationRule): NotificationRule {
   return {
     ...rule,
     event_codes: Array.isArray(rule.event_codes) ? rule.event_codes : [],
+    device_status_items: Array.isArray(rule.device_status_items) ? rule.device_status_items : defaultDeviceStatusItems(),
+    device_status_schedule: {
+      mode: rule.device_status_schedule?.mode === 'interval' ? 'interval' : 'fixed',
+      interval_minutes: Math.max(30, Number(rule.device_status_schedule?.interval_minutes) || 1440),
+      weekdays: Array.isArray(rule.device_status_schedule?.weekdays) ? rule.device_status_schedule.weekdays : [1, 2, 3, 4, 5, 6, 7],
+      times: Array.isArray(rule.device_status_schedule?.times) && rule.device_status_schedule.times.length > 0 ? rule.device_status_schedule.times : ['09:00'],
+    },
+    device_status_sms_period: ['today', 'last_24h', 'last_7d', 'all'].includes(rule.device_status_sms_period) ? rule.device_status_sms_period : 'last_24h',
     ddns_failure_threshold: Number.isFinite(threshold) && threshold > 0 ? Math.trunc(threshold) : 1,
   }
 }
@@ -273,6 +290,9 @@ export function createRule(type: NotificationEventType, channelIds: string[]): N
     matcher: { field: 'summary', operator: 'always', value: '' },
     channel_ids: channelIds,
     event_codes: type === 'system_event' ? defaultSystemEventCodes() : [],
+    device_status_items: type === 'device_status' ? defaultDeviceStatusItems() : [],
+    device_status_schedule: { mode: 'fixed', interval_minutes: 1440, weekdays: [1, 2, 3, 4, 5, 6, 7], times: ['09:00'] },
+    device_status_sms_period: 'last_24h',
     template: DEFAULT_TEMPLATES[type],
     quiet_hours: [],
     ddns_failure_threshold: 1,

@@ -185,6 +185,7 @@ export interface QosInfo {
 export interface ThermalZone {
   zone: string
   type: string
+  label?: string
   temperature: number
 }
 
@@ -567,7 +568,7 @@ export type NotificationChannelKey =
   | 'feishu_robot'
   | 'telegram'
 
-export type NotificationEventType = 'sms' | 'ddns' | 'version_update' | 'system_event'
+export type NotificationEventType = 'sms' | 'ddns' | 'version_update' | 'system_event' | 'device_status'
 export type NotificationLogStatus = 'success' | 'failed' | 'no_available_channel' | 'quiet_hours' | 'unmatched'
 export type MatcherOperator = 'always' | 'contains' | 'not_contains' | 'equals' | 'regex'
 
@@ -686,6 +687,13 @@ export interface QuietHoursSchedule {
   end: string
 }
 
+export interface DeviceStatusSchedule {
+  mode: 'fixed' | 'interval'
+  interval_minutes: number
+  weekdays: number[]
+  times: string[]
+}
+
 export interface NotificationRule {
   id: string
   type: NotificationEventType
@@ -697,6 +705,9 @@ export interface NotificationRule {
   template: string
   quiet_hours: QuietHoursSchedule[]
   ddns_failure_threshold: number
+  device_status_items: string[]
+  device_status_schedule: DeviceStatusSchedule
+  device_status_sms_period: 'today' | 'last_24h' | 'last_7d' | 'all'
 }
 
 export interface NotificationLogEntry {
