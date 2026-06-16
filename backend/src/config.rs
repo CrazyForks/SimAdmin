@@ -655,7 +655,7 @@ fn default_update_template() -> String {
     r#"{
   "msg_type": "text",
   "content": {
-    "text": "🚀 SimAdmin 发现新版本\n固件包: {{asset_name}}\n版本号: {{version}}\nCommit: {{commit}}\n构建时间: {{build_time}}\nOTA包 MD5: {{md5}}\n来源: {{own_number}}\n\n请前往 OTA 在线更新模块检测版本，一键下载并升级。"
+    "text": "🚀 SimAdmin 发现新版本\n固件包: {{asset_name}}\n版本号: {{version}}\nCommit: {{commit}}\n时间: {{time}}\n来源: {{own_number}}\n\n请前往 OTA 在线更新模块检测版本，一键下载并升级。"
   }
 }"#
     .to_string()
@@ -675,7 +675,7 @@ fn default_plain_ddns_template() -> String {
 }
 
 fn default_plain_update_template() -> String {
-    "🚀 SimAdmin 发现新版本\n固件包: {{固件包}}\n版本号: {{版本号}}\nCommit: {{Commit}}\n构建时间: {{构建时间}}\nMD5: {{MD5}}\n来源: {{本机号码}}\n\n请前往 OTA 在线更新模块检测版本，一键下载并升级。".to_string()
+    "🚀 SimAdmin 发现新版本\n固件包: {{固件包}}\n版本号: {{版本号}}\nCommit: {{Commit}}\n时间: {{时间}}\n来源: {{本机号码}}\n\n请前往 OTA 在线更新模块检测版本，一键下载并升级。".to_string()
 }
 
 fn default_sms_title_template() -> String {
@@ -1546,6 +1546,112 @@ fn migrate_legacy_webhook_config(config: &mut AppConfig) {
         .unwrap_or_else(WebhookConfig::default);
 }
 
+fn migrate_template_string(template: &mut String) -> bool {
+    let mut changed = false;
+    let md5_patterns = [
+        "OTA包 MD5: {{md5}}",
+        "OTA包 MD5: {{MD5}}",
+        "OTA包MD5: {{md5}}",
+        "OTA包MD5: {{MD5}}",
+        "MD5: {{md5}}",
+        "MD5: {{MD5}}",
+        "校验值: {{md5}}",
+        "校验值: {{MD5}}",
+        "二进制MD5: {{binary_md5}}",
+        "前端MD5: {{frontend_md5}}",
+        "{{md5}}",
+        "{{MD5}}",
+        "{{binary_md5}}",
+        "{{frontend_md5}}",
+    ];
+
+    for pattern in md5_patterns {
+        // Try replacing with leading newline (escaped JSON or real)
+        let with_escaped_newline = format!("\\n{}", pattern);
+        if template.contains(&with_escaped_newline) {
+            *template = template.replace(&with_escaped_newline, "");
+            changed = true;
+        }
+        let with_newline = format!("\n{}", pattern);
+        if template.contains(&with_newline) {
+            *template = template.replace(&with_newline, "");
+            changed = true;
+        }
+
+        // Try replacing with trailing newline (escaped JSON or real)
+        let with_escaped_trailing = format!("{}\\n", pattern);
+        if template.contains(&with_escaped_trailing) {
+            *template = template.replace(&with_escaped_trailing, "");
+            changed = true;
+        }
+        let with_trailing = format!("{}\n", pattern);
+        if template.contains(&with_trailing) {
+            *template = template.replace(&with_trailing, "");
+            changed = true;
+        }
+
+        // Fallback: replace pattern directly
+        if template.contains(pattern) {
+            *template = template.replace(pattern, "");
+            changed = true;
+        }
+    }
+
+    let time_replacements = [
+        ("构建时间: {{构建时间}}", "时间: {{时间}}"),
+        ("构建时间: {{build_time}}", "时间: {{time}}"),
+        ("{{build_time}}", "{{time}}"),
+        ("{{构建时间}}", "{{时间}}"),
+    ];
+    for (old, new) in time_replacements {
+        if template.contains(old) {
+            *template = template.replace(old, new);
+            changed = true;
+        }
+    }
+
+    changed
+}
+
+fn migrate_templates_to_remove_md5(config: &mut AppConfig) -> bool {
+    let mut changed = false;
+
+    // 1. Webhook template
+    if migrate_template_string(&mut config.webhook.update_template) {
+        changed = true;
+    }
+
+    // 2. Notification rules templates
+    for rule in &mut config.notifications.rules {
+        if rule.event_type == NotificationEventType::VersionUpdate {
+            if migrate_template_string(&mut rule.template) {
+                changed = true;
+            }
+        }
+    }
+
+    // 3. Notification channels templates
+    for channel in &mut config.notifications.channels {
+        if let Some(obj) = channel.config.as_object_mut() {
+            // E.g. BarkConfig, PushPlusConfig, WecomAppConfig etc have nested "common"
+            if let Some(common) = obj.get_mut("common").and_then(|v| v.as_object_mut()) {
+                if let Some(serde_json::Value::String(tpl)) = common.get_mut("update_template") {
+                    if migrate_template_string(tpl) {
+                        changed = true;
+                    }
+                }
+            }
+            if let Some(serde_json::Value::String(tpl)) = obj.get_mut("update_template") {
+                if migrate_template_string(tpl) {
+                    changed = true;
+                }
+            }
+        }
+    }
+
+    changed
+}
+
 /// 配置管理器
 pub struct ConfigManager {
     config: Arc<RwLock<AppConfig>>,
@@ -1575,14 +1681,15 @@ impl ConfigManager {
         };
 
         migrate_legacy_webhook_config(&mut config);
+        let changed = migrate_templates_to_remove_md5(&mut config);
 
         let manager = Self {
             config: Arc::new(RwLock::new(config)),
             config_path,
         };
 
-        // 保存默认配置（如果文件不存在）
-        if !manager.config_path.exists() {
+        // 保存配置（如果文件不存在，或者配置模板发生了自动清理）
+        if !manager.config_path.exists() || changed {
             let _ = manager.save();
         }
 

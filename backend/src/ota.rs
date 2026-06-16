@@ -14,7 +14,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 /// OTA 相关路径
 const OTA_STAGING_DIR: &str = "/tmp/ota_staging";
@@ -26,7 +26,6 @@ const NM_CONF_DIR: &str = "/etc/NetworkManager/conf.d";
 const NM_CONF_PATH: &str = "/etc/NetworkManager/conf.d/99-simadmin-unmanaged-modem.conf";
 const NM_UNMANAGED_WWAN_CONFIG: &str = "[keyfile]\nunmanaged-devices=interface-name:wwan*\n";
 const LATEST_RELEASE_API: &str = "https://api.github.com/repos/3899/SimAdmin/releases/latest";
-const OTA_NOTICE_TMP_PREFIX: &str = "/tmp/simadmin_update_notice";
 const BEIJING_UTC_OFFSET_SECONDS: i32 = 8 * 60 * 60;
 const UPDATE_CHECK_HOURS: [u32; 2] = [9, 18];
 const OTA_HTTP_TIMEOUT_SECS: u64 = 30;
@@ -225,26 +224,15 @@ pub async fn check_and_notify_version_update(
 
     let asset = supported_release_asset(&release)
         .ok_or_else(|| "No supported OTA asset found in latest release".to_string())?;
-    let (meta, package_md5) = fetch_release_asset_meta(&client, &proxy_prefix, true, asset).await?;
     let own_number = notification_sender.get_own_number().await;
+    let current_time = chrono::Utc::now().to_rfc3339();
     let event = VersionUpdateEvent {
         asset_name: asset.name.clone(),
-        version: if meta.version.trim().is_empty() {
-            notify_version.clone()
-        } else {
-            meta.version.clone()
-        },
-        commit: if meta.commit.trim().is_empty() {
-            release.target_commitish.clone().unwrap_or_default()
-        } else {
-            meta.commit.clone()
-        },
-        build_time: meta.build_time.clone(),
-        md5: package_md5,
-        binary_md5: meta.binary_md5.clone(),
-        frontend_md5: meta.frontend_md5.clone(),
+        version: notify_version.clone(),
+        commit: release.target_commitish.clone().unwrap_or_default(),
+        build_time: current_time.clone(),
         release_url: release.html_url.clone().unwrap_or_default(),
-        timestamp: chrono::Utc::now().to_rfc3339(),
+        timestamp: current_time,
         own_number,
     };
 
@@ -265,19 +253,6 @@ pub async fn check_and_notify_version_update(
     Ok(())
 }
 
-async fn fetch_release_asset_meta(
-    client: &reqwest::Client,
-    proxy_prefix: &str,
-    include_builtin_proxies: bool,
-    asset: &OtaReleaseAsset,
-) -> Result<(OtaMeta, String), String> {
-    let bytes = download_ota_asset_bytes(client, proxy_prefix, include_builtin_proxies, asset)
-        .await
-        .map_err(|e| e.replace("OTA asset download", "OTA asset metadata download"))?;
-    let package_md5 = format!("{:x}", md5::compute(&bytes));
-    let meta = read_ota_meta_from_archive(&asset.name, &bytes)?;
-    Ok((meta, package_md5))
-}
 
 pub async fn download_ota_asset_bytes(
     client: &reqwest::Client,
@@ -339,60 +314,6 @@ pub async fn download_ota_asset_bytes(
     }
 }
 
-fn read_ota_meta_from_archive(asset_name: &str, data: &[u8]) -> Result<OtaMeta, String> {
-    let tmp_dir = PathBuf::from(format!(
-        "{}_{}",
-        OTA_NOTICE_TMP_PREFIX,
-        current_timestamp_millis()
-    ));
-    fs::create_dir_all(&tmp_dir)
-        .map_err(|e| format!("Failed to create OTA metadata temp dir: {}", e))?;
-
-    let archive_name = if detect_zip_format(data) {
-        "update.zip"
-    } else if asset_name.to_ascii_lowercase().ends_with(".zip") {
-        "update.zip"
-    } else {
-        "update.tar.gz"
-    };
-    let archive_path = tmp_dir.join(archive_name);
-
-    let result = (|| {
-        let mut file = fs::File::create(&archive_path)
-            .map_err(|e| format!("Failed to create OTA metadata temp file: {}", e))?;
-        file.write_all(data)
-            .map_err(|e| format!("Failed to write OTA metadata temp file: {}", e))?;
-
-        let output = if archive_name.ends_with(".zip") {
-            Command::new("unzip")
-                .arg("-p")
-                .arg(&archive_path)
-                .arg("meta.json")
-                .output()
-                .map_err(|e| format!("Failed to read OTA zip metadata: {}", e))?
-        } else {
-            Command::new("tar")
-                .arg("-xOzf")
-                .arg(&archive_path)
-                .arg("meta.json")
-                .output()
-                .map_err(|e| format!("Failed to read OTA tar metadata: {}", e))?
-        };
-
-        if !output.status.success() {
-            return Err(format!(
-                "Failed to extract OTA metadata: {}",
-                String::from_utf8_lossy(&output.stderr)
-            ));
-        }
-
-        serde_json::from_slice::<OtaMeta>(&output.stdout)
-            .map_err(|e| format!("Invalid OTA metadata: {}", e))
-    })();
-
-    let _ = fs::remove_dir_all(&tmp_dir);
-    result
-}
 
 /// 读取待安装的更新元数据
 fn read_pending_meta() -> Option<OtaMeta> {
@@ -601,12 +522,6 @@ fn beijing_offset() -> FixedOffset {
     FixedOffset::east_opt(BEIJING_UTC_OFFSET_SECONDS).expect("valid Beijing UTC offset")
 }
 
-fn current_timestamp_millis() -> u128 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis())
-        .unwrap_or_default()
-}
 
 /// 应用 OTA 更新
 pub fn apply_ota_update(restart_now: bool) -> Result<String, String> {

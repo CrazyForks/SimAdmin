@@ -152,7 +152,7 @@ export const MATCH_FIELDS: Record<NotificationEventType, { value: string; label:
 export const DEFAULT_TEMPLATES: Record<NotificationEventType, string> = {
   sms: '📱 短信通知\n号码: {{发送方号码}}\n内容: {{短信内容}}\n时间: {{时间}}\n来源: {{本机号码}}',
   ddns: 'DDNS 通知\n域名: {{域名}}\nIP 类型: {{IP类型}}\n新 IP: {{新IP}}\n旧 IP: {{旧IP}}\n服务商: {{服务商}}\n记录类型: {{记录类型}}\n状态: {{状态}}\n消息: {{消息}}\n更新时间: {{更新时间}}',
-  version_update: '🚀 SimAdmin 发现新版本\n固件包: {{固件包}}\n版本号: {{版本号}}\nCommit: {{Commit}}\n构建时间: {{构建时间}}\nMD5: {{MD5}}\n来源: {{本机号码}}',
+  version_update: '🚀 SimAdmin 发现新版本\n固件包: {{固件包}}\n版本号: {{版本号}}\nCommit: {{Commit}}\n时间: {{时间}}\n来源: {{本机号码}}',
   system_event: DEFAULT_SYSTEM_EVENT_TEMPLATE,
   device_status: DEFAULT_DEVICE_STATUS_TEMPLATE,
   automation: '🤖 自动化事件通知\n任务名称: {{任务名称}}\n任务类型: {{任务类型}}\n执行状态: {{任务状态}}\n详情: {{任务详情}}\n时间: {{触发时间}}\n来源: {{本机号码}}',
@@ -185,8 +185,7 @@ export const TEMPLATE_VARIABLES: Record<NotificationEventType, TemplateVariable[
     { label: '固件包', token: '{{固件包}}' },
     { label: '版本号', token: '{{版本号}}' },
     { label: 'Commit', token: '{{Commit}}' },
-    { label: '构建时间', token: '{{构建时间}}' },
-    { label: 'MD5', token: '{{MD5}}' },
+    { label: '时间', token: '{{时间}}' },
     { label: '本机号码', token: '{{本机号码}}' },
   ],
   system_event: SYSTEM_EVENT_TEMPLATE_VARIABLES,

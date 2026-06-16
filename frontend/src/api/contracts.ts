@@ -801,7 +801,7 @@ export const DEFAULT_DDNS_TEMPLATE = `{
 export const DEFAULT_UPDATE_TEMPLATE = `{
   "msg_type": "text",
   "content": {
-    "text": "🚀 SimAdmin 发现新版本\\n固件包: {{asset_name}}\\n版本号: {{version}}\\nCommit: {{commit}}\\n构建时间: {{build_time}}\\nOTA包 MD5: {{md5}}\\n来源: {{own_number}}\\n\\n请前往 OTA 更新页面的在线更新模块检查更新，可一键下载并升级。"
+    "text": "🚀 SimAdmin 发现新版本\\n固件包: {{asset_name}}\\n版本号: {{version}}\\nCommit: {{commit}}\\n时间: {{time}}\\n来源: {{own_number}}\\n\\n请前往 OTA 更新页面的在线更新模块检查更新，可一键下载并升级。"
   }
 }`
 
@@ -833,8 +833,7 @@ export const DEFAULT_PLAIN_UPDATE_TEMPLATE = `🚀 SimAdmin 发现新版本
 固件包: {{asset_name}}
 版本号: {{version}}
 Commit: {{commit}}
-构建时间: {{build_time}}
-OTA包 MD5: {{md5}}
+时间: {{time}}
 来源: {{own_number}}
 
 请前往 OTA 更新页面的在线更新模块检查更新，可一键下载并升级。`

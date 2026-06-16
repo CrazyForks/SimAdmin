@@ -184,7 +184,6 @@ impl NotificationEvent<'_> {
                 "version" => event.version.clone(),
                 "commit" => event.commit.clone(),
                 "build_time" => event.build_time.clone(),
-                "md5" => event.md5.clone(),
                 _ => self.summary(),
             },
             NotificationEvent::SystemEvent(event) => match field {
@@ -2408,11 +2407,11 @@ const DEFAULT_DDNS_JSON_TEMPLATE: &str = r#"{
     "text": "SimAdmin DDNS 通知\n域名: {{domains}}\nIP类型: {{ip_type}}\n新IP: {{new_ip}}\n旧IP: {{old_ip}}\n服务商: {{provider}}\n记录类型: {{record_type}}\n状态: {{status}}\n消息: {{message}}\n更新时间: {{timestamp}}"
   }
 }"#;
-const DEFAULT_UPDATE_TEXT_TEMPLATE: &str = "🚀 SimAdmin 发现新版本\n固件包: {{固件包}}\n版本号: {{版本号}}\nCommit: {{Commit}}\n构建时间: {{构建时间}}\nMD5: {{MD5}}\n来源: {{本机号码}}\n\n请前往 OTA 更新页面的在线更新模块检查更新，可一键下载并升级。";
+const DEFAULT_UPDATE_TEXT_TEMPLATE: &str = "🚀 SimAdmin 发现新版本\n固件包: {{固件包}}\n版本号: {{版本号}}\nCommit: {{Commit}}\n时间: {{时间}}\n来源: {{本机号码}}\n\n请前往 OTA 更新页面的在线更新模块检查更新，可一键下载并升级。";
 const DEFAULT_UPDATE_JSON_TEMPLATE: &str = r#"{
   "msg_type": "text",
   "content": {
-    "text": "🚀 SimAdmin 发现新版本\n固件包: {{asset_name}}\n版本号: {{version}}\nCommit: {{commit}}\n构建时间: {{build_time}}\nOTA包 MD5: {{md5}}\n来源: {{own_number}}\n\n请前往 OTA 更新页面的在线更新模块检查更新，可一键下载并升级。"
+    "text": "🚀 SimAdmin 发现新版本\n固件包: {{asset_name}}\n版本号: {{version}}\nCommit: {{commit}}\n时间: {{time}}\n来源: {{own_number}}\n\n请前往 OTA 更新页面的在线更新模块检查更新，可一键下载并升级。"
   }
 }"#;
 
@@ -2515,9 +2514,6 @@ fn render_version_update_template(
     let commit = maybe_escape(&event.commit);
     let build_time_value = format_notification_time(&event.build_time);
     let build_time = maybe_escape(&build_time_value);
-    let md5 = maybe_escape(&event.md5);
-    let binary_md5 = maybe_escape(&event.binary_md5);
-    let frontend_md5 = maybe_escape(&event.frontend_md5);
     let release_url = maybe_escape(&event.release_url);
     let timestamp_value = format_notification_time(&event.timestamp);
     let timestamp = maybe_escape(&timestamp_value);
@@ -2531,22 +2527,15 @@ fn render_version_update_template(
         .replace("{{commit}}", &commit)
         .replace("{{Commit}}", &commit)
         .replace("{{build_time}}", &build_time)
-        .replace("{{md5}}", &md5)
-        .replace("{{MD5}}", &md5)
-        .replace("{{binary_md5}}", &binary_md5)
-        .replace("{{frontend_md5}}", &frontend_md5)
         .replace("{{release_url}}", &release_url)
         .replace("{{timestamp}}", &timestamp)
         .replace("{{time}}", &timestamp)
+        .replace("{{时间}}", &timestamp)
         .replace("{{固件包}}", &asset_name)
         .replace("{{文件名}}", &asset_name)
         .replace("{{版本号}}", &version)
         .replace("{{提交}}", &commit)
         .replace("{{构建时间}}", &build_time)
-        .replace("{{校验值}}", &md5)
-        .replace("{{OTA包MD5}}", &md5)
-        .replace("{{二进制MD5}}", &binary_md5)
-        .replace("{{前端MD5}}", &frontend_md5)
         .replace("{{发布地址}}", &release_url)
         .replace("{{发布时间}}", &timestamp);
     replace_own_number(rendered, &own_number)
@@ -3316,9 +3305,6 @@ mod tests {
             version: "1.0.4".to_string(),
             commit: "abc1234".to_string(),
             build_time: "2026-05-14T16:30:45Z".to_string(),
-            md5: "package-md5".to_string(),
-            binary_md5: "binary-md5".to_string(),
-            frontend_md5: "frontend-md5".to_string(),
             release_url: "https://github.com/3899/SimAdmin/releases/tag/v1.0.4".to_string(),
             timestamp: "2026-05-14T17:00:00Z".to_string(),
             own_number: "+10001".to_string(),
@@ -3326,11 +3312,11 @@ mod tests {
 
         assert_eq!(
             render_version_update_template(
-                "{{asset_name}}|{{version}}|{{Commit}}|{{build_time}}|{{MD5}}|{{本机号码}}",
+                "{{asset_name}}|{{version}}|{{Commit}}|{{build_time}}|{{时间}}|{{本机号码}}",
                 &event,
                 false
             ),
-            "simadmin_1.0.4.tar.gz|1.0.4|abc1234|2026-05-15 00:30:45|package-md5|+10001"
+            "simadmin_1.0.4.tar.gz|1.0.4|abc1234|2026-05-15 00:30:45|2026-05-15 01:00:00|+10001"
         );
     }
 
