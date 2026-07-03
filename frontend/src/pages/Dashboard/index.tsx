@@ -43,6 +43,7 @@ function StatusBar({ data }: { data: DashboardData }) {
   const networkTech = getNetworkTech(data)
   const carrierLogo = getCarrierLogo(data.networkInfo?.mcc, data.networkInfo?.mnc)
   const carrierName = formatCarrierName(data.networkInfo?.mcc, data.networkInfo?.mnc)
+  const isAirplaneMode = data.airplaneMode?.enabled ?? false
   const ipValueSx = {
     minWidth: 0,
     overflow: 'hidden',
@@ -95,32 +96,36 @@ function StatusBar({ data }: { data: DashboardData }) {
           </Typography>
         </Box>
 
-        <Box display="flex" alignItems="center" gap={1}>
-          {carrierLogo ? (
-            <Box component="img" src={carrierLogo} alt={carrierName} sx={{ height: 24, maxWidth: 92, objectFit: 'contain' }} />
-          ) : (
-            <Chip label={carrierName} size="small" variant="outlined" />
-          )}
-          <Chip
-            icon={<SignalCellularAlt />}
-            label={`${signal}%`}
-            color={signal > 70 ? 'success' : signal > 35 ? 'primary' : 'warning'}
-            size="small"
-            variant="outlined"
-          />
-        </Box>
-        <Chip icon={<WifiTethering />} label={networkTech} color={networkTech === '5G' ? 'success' : 'primary'} size="small" />
-        <Chip
-          icon={<CheckCircle />}
-          label={getRegistrationLabel(data.networkInfo?.registration_status)}
-          color={data.networkInfo?.registration_status === 'registered' ? 'success' : 'default'}
-          size="small"
-          variant="outlined"
-        />
+        {!isAirplaneMode && (
+          <>
+            <Box display="flex" alignItems="center" gap={1}>
+              {carrierLogo ? (
+                <Box component="img" src={carrierLogo} alt={carrierName} sx={{ height: 24, maxWidth: 92, objectFit: 'contain' }} />
+              ) : (
+                <Chip label={carrierName} size="small" variant="outlined" />
+              )}
+              <Chip
+                icon={<SignalCellularAlt />}
+                label={`${signal}%`}
+                color={signal > 70 ? 'success' : signal > 35 ? 'primary' : 'warning'}
+                size="small"
+                variant="outlined"
+              />
+            </Box>
+            <Chip icon={<WifiTethering />} label={networkTech} color={networkTech === '5G' ? 'success' : 'primary'} size="small" />
+            <Chip
+              icon={<CheckCircle />}
+              label={getRegistrationLabel(data.networkInfo?.registration_status)}
+              color={data.networkInfo?.registration_status === 'registered' ? 'success' : 'default'}
+              size="small"
+              variant="outlined"
+            />
+          </>
+        )}
+        {isAirplaneMode && <Chip icon={<FlightTakeoff />} label="飞行模式" color="warning" size="small" />}
         <Typography variant="caption" color="text.disabled">
           | 运行 {data.systemStats?.uptime?.uptime_formatted || '-'}
         </Typography>
-        {data.airplaneMode?.enabled && <Chip icon={<FlightTakeoff />} label="飞行模式" color="warning" size="small" />}
       </Stack>
 
       <Stack spacing={0.75} sx={{ minWidth: { xs: '100%', md: 360 }, ml: { md: 'auto' } }}>

@@ -789,7 +789,7 @@ impl Database {
                     "SELECT id, direction, phone_number, content, timestamp, status, pdu
                      FROM sms_messages
                      WHERE direction = ?1
-                     ORDER BY timestamp DESC
+                     ORDER BY timestamp DESC, id DESC
                      LIMIT ?2 OFFSET ?3",
                 )?;
 
@@ -807,7 +807,7 @@ impl Database {
                 let mut stmt = conn.prepare(
                     "SELECT id, direction, phone_number, content, timestamp, status, pdu
                      FROM sms_messages
-                     ORDER BY timestamp DESC
+                     ORDER BY timestamp DESC, id DESC
                      LIMIT ?1 OFFSET ?2",
                 )?;
 
@@ -830,7 +830,7 @@ impl Database {
             "SELECT id, direction, phone_number, content, timestamp, status, pdu
              FROM sms_messages
              WHERE phone_number = ?1
-             ORDER BY timestamp DESC
+             ORDER BY timestamp DESC, id DESC
              LIMIT ?2",
         )?;
 
@@ -1885,7 +1885,7 @@ impl Database {
         let task_type = task_type.trim();
         let status = status.trim();
         let query = query.trim();
-        
+
         let start_at = notification_log_start_bound(start_date);
         let end_at = notification_log_end_bound(end_date);
 
@@ -1990,7 +1990,7 @@ impl Database {
         let conn = self.conn.lock().unwrap();
         let task_type = task_type.trim();
         let status = status.trim();
-        
+
         let start_at = notification_log_start_bound(start_date);
         let end_at = notification_log_end_bound(end_date);
 

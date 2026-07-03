@@ -288,7 +288,7 @@ class SimAdminCurrentAPI {
     return request<ApiResponse<EsimCommandResponse>>(`/esim/profiles/${encodeURIComponent(iccid)}/enable`, {
       method: 'POST',
       body: JSON.stringify({}),
-      timeoutMs: 150000,
+      timeoutMs: 10000,
     })
   }
 

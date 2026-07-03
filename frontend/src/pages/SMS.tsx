@@ -70,6 +70,14 @@ function smsTimestampMillis(timestamp: string): number {
   return parseSmsTimestamp(timestamp)?.getTime() ?? 0
 }
 
+function compareSmsChronological(a: SmsMessage, b: SmsMessage): number {
+  return smsTimestampMillis(a.timestamp) - smsTimestampMillis(b.timestamp) || a.id - b.id
+}
+
+function compareSmsNewestFirst(a: SmsMessage, b: SmsMessage): number {
+  return smsTimestampMillis(b.timestamp) - smsTimestampMillis(a.timestamp) || b.id - a.id
+}
+
 function buildConversations(msgs: SmsMessage[]): ConversationGroup[] {
   const groups = new Map<string, SmsMessage[]>()
 
@@ -83,7 +91,7 @@ function buildConversations(msgs: SmsMessage[]): ConversationGroup[] {
 
   const conversationList: ConversationGroup[] = []
   groups.forEach((groupMessages, phoneNumber) => {
-    groupMessages.sort((a, b) => smsTimestampMillis(b.timestamp) - smsTimestampMillis(a.timestamp))
+    groupMessages.sort(compareSmsNewestFirst)
     conversationList.push({
       phoneNumber,
       messages: groupMessages,
@@ -92,9 +100,7 @@ function buildConversations(msgs: SmsMessage[]): ConversationGroup[] {
     })
   })
 
-  conversationList.sort(
-    (a, b) => smsTimestampMillis(b.lastMessage.timestamp) - smsTimestampMillis(a.lastMessage.timestamp),
-  )
+  conversationList.sort((a, b) => compareSmsNewestFirst(a.lastMessage, b.lastMessage))
 
   return conversationList
 }
@@ -220,9 +226,7 @@ export default function SMSPage() {
     try {
       const response = await api.getSmsConversation({ phone_number: phone, limit: 1000 })
       if (response.status === 'ok' && response.data) {
-        const sorted = [...response.data.messages].sort(
-          (a, b) => smsTimestampMillis(a.timestamp) - smsTimestampMillis(b.timestamp),
-        )
+        const sorted = [...response.data.messages].sort(compareSmsChronological)
         setConversationMessages(sorted)
         setTimeout(() => {
           if (scrollTargetId !== undefined) {
@@ -234,9 +238,7 @@ export default function SMSPage() {
       }
     } catch {
       const localMsgs = messages.filter((m) => m.phone_number === phone)
-      const sorted = [...localMsgs].sort(
-        (a, b) => smsTimestampMillis(a.timestamp) - smsTimestampMillis(b.timestamp),
-      )
+      const sorted = [...localMsgs].sort(compareSmsChronological)
       setConversationMessages(sorted)
       setTimeout(() => {
         if (scrollTargetId !== undefined) {

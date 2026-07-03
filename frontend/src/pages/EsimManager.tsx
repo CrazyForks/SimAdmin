@@ -20,6 +20,7 @@ import {
   ListItemText,
   MenuItem,
   Snackbar,
+  Stack,
   TextField,
   Tooltip,
   Typography,
@@ -48,7 +49,7 @@ import { alpha, type Theme } from '@mui/material/styles'
 import { api } from '../api/current'
 import ErrorSnackbar from '../components/ErrorSnackbar'
 import { formatCarrierName } from '../utils/carriers'
-import type { EsimCommandResponse, EsimEuiccInfo, EsimLpacStatusResponse, EsimProfile } from '../api/types'
+import type { BasebandRestartStep, EsimCommandResponse, EsimEuiccInfo, EsimLpacStatusResponse, EsimProfile } from '../api/types'
 
 type ConfirmAction = 'enable' | 'delete' | null
 const CONFIRM_DELETE_PROFILE = '确认删除'
@@ -582,6 +583,13 @@ export default function EsimManagerPage() {
   const [totalMemoryInput, setTotalMemoryInput] = useState('')
   const [savingTotalMemory, setSavingTotalMemory] = useState(false)
 
+  // Baseband recovery progress tracking (shown after profile enable)
+  const [basebandRecoveryOpen, setBasebandRecoveryOpen] = useState(false)
+  const [basebandRecoveryRunning, setBasebandRecoveryRunning] = useState(false)
+  const [basebandRecoverySteps, setBasebandRecoverySteps] = useState<BasebandRestartStep[]>([])
+  const [basebandRecoveryRegistration, setBasebandRecoveryRegistration] = useState<string | null>(null)
+  const basebandRecoveryTimerRef = useRef<number | undefined>(undefined)
+
   const euiccCardRef = useRef<HTMLDivElement | null>(null)
   const [gridHeight, setGridHeight] = useState<string | number>('calc(100vh - 350px)')
 
@@ -920,6 +928,60 @@ export default function EsimManagerPage() {
     }
   }
 
+  const loadBasebandRecoveryStatus = async () => {
+    try {
+      const res = await api.getBasebandRestartStatus()
+      const data = res.data
+      if (data) {
+        setBasebandRecoverySteps(data.steps ?? [])
+        setBasebandRecoveryRegistration(data.current_registration ?? null)
+        if (!data.running) return true // finished
+      }
+    } catch { /* ignore polling errors */ }
+    return false
+  }
+
+  const startBasebandRecoveryPolling = () => {
+    setBasebandRecoveryOpen(true)
+    setBasebandRecoveryRunning(true)
+    setBasebandRecoverySteps([])
+    setBasebandRecoveryRegistration(null)
+
+    // Poll every 1s until baseband recovery finishes
+    const timer = window.setInterval(() => {
+      void loadBasebandRecoveryStatus().then((finished) => {
+        if (finished) {
+          window.clearInterval(timer)
+          setBasebandRecoveryRunning(false)
+          void loadData(true)
+        }
+      })
+    }, 1000)
+    basebandRecoveryTimerRef.current = timer
+  }
+
+  // Cleanup polling timer on unmount
+  useEffect(() => {
+    return () => {
+      if (basebandRecoveryTimerRef.current !== undefined) {
+        window.clearInterval(basebandRecoveryTimerRef.current)
+      }
+    }
+  }, [])
+
+  const getRecoveryErrorStep = () => basebandRecoverySteps.find(s => s.status === 'error')
+
+  const getCurrentRecoveryMessage = () => {
+    const errorStep = getRecoveryErrorStep()
+    if (errorStep) return errorStep.detail || `${errorStep.step} 失败`
+    if (!basebandRecoveryRunning && basebandRecoverySteps.length > 0) {
+      return '网络恢复成功！'
+    }
+    if (basebandRecoverySteps.length === 0) return '正在启动恢复程序...'
+    const lastStep = basebandRecoverySteps[basebandRecoverySteps.length - 1]
+    return lastStep.status === 'running' ? `正在进行：${lastStep.step}` : `已完成：${lastStep.step}`
+  }
+
   const runProfileAction = async () => {
     if (!selectedProfile || !confirmAction) return
     if (confirmAction === 'delete' && deleteConfirmText !== CONFIRM_DELETE_PROFILE) return
@@ -935,10 +997,12 @@ export default function EsimManagerPage() {
       }
       const action = confirmAction
       const targetIccid = selectedProfile.iccid
-      setSuccess(confirmAction === 'enable' ? 'Profile 启用并刷新基带完成' : 'Profile 删除完成')
       setConfirmAction(null)
       setDeleteConfirmText('')
       if (action === 'enable') {
+        // Profile enable succeeded (lpac command done), baseband recovery runs in background.
+        // Immediately update the UI optimistically and open the recovery progress dialog.
+        setSuccess('Profile 启用指令成功，基带正在恢复...')
         setSelectedIccid(targetIccid)
         updateEsimPageSnapshot({ selectedIccid: targetIccid })
         setProfiles((current) => {
@@ -952,7 +1016,9 @@ export default function EsimManagerPage() {
           updateEsimPageSnapshot({ profiles: nextProfiles })
           return nextProfiles
         })
+        startBasebandRecoveryPolling()
       } else {
+        setSuccess('Profile 删除完成')
         setProfiles((current) => {
           const nextProfiles = current.filter((profile) => profile.iccid !== targetIccid)
           updateEsimPageSnapshot({ profiles: nextProfiles })
@@ -963,8 +1029,8 @@ export default function EsimManagerPage() {
           updateEsimPageSnapshot({ selectedIccid: nextSelectedIccid })
           return nextSelectedIccid
         })
+        void loadData(true)
       }
-      void loadData(true)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -1681,10 +1747,10 @@ export default function EsimManagerPage() {
                           <InfoCell label="短信中心号码 (SMSC)" value={selectedProfile.smsc} mono emptyText="未读取到" />
                         </Grid>
                         <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-                          <InfoCell label="MCC / MNC" value={[selectedProfile.mcc, selectedProfile.mnc].filter(Boolean).join(' / ')} mono />
+                          <InfoCell label="IMSI" value={selectedProfile.imsi} mono />
                         </Grid>
                         <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-                          <InfoCell label="IMSI" value={selectedProfile.imsi} mono />
+                          <InfoCell label="MCC / MNC" value={[selectedProfile.mcc, selectedProfile.mnc].filter(Boolean).join(' / ')} mono />
                         </Grid>
                         <Grid size={{ xs: 12, sm: 6, md: 4 }}>
                           <InfoCell label="Profile Class" value={selectedProfile.class} />
@@ -1762,6 +1828,44 @@ export default function EsimManagerPage() {
             startIcon={actionLoading ? <CircularProgress size={16} /> : undefined}
           >
             {confirmAction === 'delete' ? '确认删除' : '确认'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={basebandRecoveryOpen}
+        onClose={() => { if (!basebandRecoveryRunning) setBasebandRecoveryOpen(false) }}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>eSIM 切卡恢复</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} alignItems="center" sx={{ py: 2 }}>
+            {basebandRecoveryRunning && !getRecoveryErrorStep() && (
+              <CircularProgress size={48} />
+            )}
+            {getRecoveryErrorStep() ? (
+              <Alert severity="error" sx={{ width: '100%' }}>{getCurrentRecoveryMessage()}</Alert>
+            ) : !basebandRecoveryRunning && basebandRecoverySteps.length > 0 ? (
+              <Alert severity="success" sx={{ width: '100%' }}>{getCurrentRecoveryMessage()}</Alert>
+            ) : (
+              <Typography variant="body1" color="text.secondary" textAlign="center">
+                {getCurrentRecoveryMessage()}
+              </Typography>
+            )}
+            {basebandRecoveryRegistration && basebandRecoveryRunning && (
+              <Typography variant="caption" color="text.secondary" textAlign="center">
+                当前注册状态：{basebandRecoveryRegistration}
+              </Typography>
+            )}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            disabled={basebandRecoveryRunning}
+            onClick={() => setBasebandRecoveryOpen(false)}
+          >
+            关闭
           </Button>
         </DialogActions>
       </Dialog>

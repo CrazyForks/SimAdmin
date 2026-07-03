@@ -425,12 +425,12 @@ export default function ConfigurationPage() {
                   ? theme.palette.error.main
                   : theme.palette.warning.main
               const bgColor = healthOk
-                ? theme.palette.mode === 'light' ? 'rgba(46, 125, 50, 0.08)' : 'rgba(102, 187, 106, 0.16)'
+                ? theme.palette.mode === 'light' ? 'rgba(42, 174, 103, 0.08)' : 'rgba(102, 187, 106, 0.16)'
                 : healthKnown
                   ? theme.palette.mode === 'light' ? 'rgba(211, 47, 47, 0.08)' : 'rgba(244, 67, 54, 0.16)'
                   : theme.palette.mode === 'light' ? 'rgba(237, 108, 2, 0.08)' : 'rgba(255, 167, 38, 0.16)'
               const hoverBgColor = healthOk
-                ? theme.palette.mode === 'light' ? 'rgba(46, 125, 50, 0.12)' : 'rgba(102, 187, 106, 0.22)'
+                ? theme.palette.mode === 'light' ? 'rgba(42, 174, 103, 0.12)' : 'rgba(102, 187, 106, 0.22)'
                 : healthKnown
                   ? theme.palette.mode === 'light' ? 'rgba(211, 47, 47, 0.12)' : 'rgba(244, 67, 54, 0.22)'
                   : theme.palette.mode === 'light' ? 'rgba(237, 108, 2, 0.12)' : 'rgba(255, 167, 38, 0.22)'
@@ -474,7 +474,7 @@ export default function ConfigurationPage() {
                   borderRadius: '50%',
                   boxShadow: (theme) => `0 0 0 5px ${
                     healthOk
-                      ? theme.palette.mode === 'light' ? 'rgba(46, 125, 50, 0.12)' : 'rgba(102, 187, 106, 0.18)'
+                      ? theme.palette.mode === 'light' ? 'rgba(42, 174, 103, 0.12)' : 'rgba(102, 187, 106, 0.18)'
                       : healthKnown
                         ? theme.palette.mode === 'light' ? 'rgba(211, 47, 47, 0.12)' : 'rgba(244, 67, 54, 0.18)'
                         : theme.palette.mode === 'light' ? 'rgba(237, 108, 2, 0.12)' : 'rgba(255, 167, 38, 0.18)'

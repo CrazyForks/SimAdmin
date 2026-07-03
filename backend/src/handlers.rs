@@ -22,7 +22,7 @@ use crate::{
     esim::EsimApiError,
     models::*,
     modem_manager::{
-        answer_call, apply_roaming_policy, background_fetch_smsc, current_sim_identity,
+        self, answer_call, apply_roaming_policy, background_fetch_smsc, current_sim_identity,
         find_nm_modem_connection_pub, get_airplane_mode, get_band_lock_status,
         get_baseband_restart_progress, get_call_by_path, get_call_settings, get_cell_location,
         get_cells_data, get_data_connection_status, get_device_info_data, get_is_roaming_mm,
@@ -393,7 +393,6 @@ pub async fn repair_esim_lpac_handler(
     }
 }
 
-
 /// GET /api/esim/config
 pub async fn get_esim_config_handler(State(app): State<AppState>) -> impl IntoResponse {
     let esim_config = app.config_manager.get_esim_config();
@@ -411,7 +410,10 @@ pub async fn set_esim_config_handler(
     match app.config_manager.set_esim_config(payload) {
         Ok(_) => (
             StatusCode::OK,
-            Json(ApiResponse::<()>::success_with_message("eSIM config updated successfully", ())),
+            Json(ApiResponse::<()>::success_with_message(
+                "eSIM config updated successfully",
+                (),
+            )),
         ),
         Err(err) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -505,103 +507,126 @@ pub async fn enable_esim_profile_handler(
     Path(iccid): Path<String>,
 ) -> impl IntoResponse {
     let event_entity = mask_identifier(&iccid);
-    match app.esim_supervisor.enable_profile(iccid.clone()).await {
-        Ok(mut data) => {
-            if esim_command_succeeded(&data) {
-                let auto_connect_data = !app.data_user_disabled.load(Ordering::SeqCst);
-                let allow_roaming = app.config_manager.get_roaming_allowed();
-                let apn_config = app.config_manager.get_apn_config();
-                match power_cycle_sim_for_profile_switch(
-                    &app.dbus_conn,
-                    auto_connect_data,
-                    allow_roaming,
-                    Some(apn_config),
-                )
-                .await
-                {
-                    Ok(recovery) => {
-                        let lpac_data = data.data.take();
-                        data.msg =
-                            "Profile enabled and modem SIM power-cycle completed".to_string();
-                        data.data = Some(json!({
-                            "lpac_data": lpac_data,
-                            "baseband_restart": recovery,
-                        }));
-                        if app.sms_resync.request_scan("profile-switch") {
-                            info!("Requested SMS resync after eSIM profile switch");
-                        } else {
-                            warn!("Failed to request SMS resync after eSIM profile switch");
+
+    modem_manager::reset_baseband_restart_progress();
+    modem_manager::record_restart_step("启用 eSIM Profile", "running", None);
+
+    let bg_app = app.clone();
+    let bg_iccid = iccid.clone();
+    let bg_event_entity = event_entity.clone();
+
+    tokio::spawn(async move {
+        let _guard = modem_manager::BasebandRestartRunGuard;
+
+        match bg_app.esim_supervisor.enable_profile(bg_iccid).await {
+            Ok(data) => {
+                if esim_command_succeeded(&data) {
+                    modem_manager::record_restart_step("启用 eSIM Profile", "ok", None);
+                    let auto_connect_data = !bg_app.data_user_disabled.load(Ordering::SeqCst);
+                    let allow_roaming = bg_app.config_manager.get_roaming_allowed();
+                    let apn_config = bg_app.config_manager.get_apn_config();
+                    match power_cycle_sim_for_profile_switch(
+                        &bg_app.dbus_conn,
+                        auto_connect_data,
+                        allow_roaming,
+                        Some(apn_config),
+                    )
+                    .await
+                    {
+                        Ok(_recovery) => {
+                            if bg_app.sms_resync.request_scan("profile-switch") {
+                                info!("Requested SMS resync after eSIM profile switch");
+                            } else {
+                                warn!("Failed to request SMS resync after eSIM profile switch");
+                            }
+                            bg_app
+                                .system_event_emitter
+                                .emit_code(
+                                    system_event_codes::ESIM_PROFILE_ENABLE_SUCCEEDED,
+                                    system_event_severity::INFO,
+                                    system_event_status::SUCCEEDED,
+                                    bg_event_entity,
+                                    "Profile 启用成功，基带恢复完成",
+                                )
+                                .await;
                         }
-                        app.system_event_emitter
-                            .emit_code(
-                                system_event_codes::ESIM_PROFILE_ENABLE_SUCCEEDED,
-                                system_event_severity::INFO,
-                                system_event_status::SUCCEEDED,
-                                event_entity.clone(),
-                                "Profile 启用成功，基带恢复完成",
-                            )
-                            .await;
-                    }
-                    Err(err) => {
-                        data.code = 1;
-                        data.status = "error".to_string();
-                        data.msg = format!(
-                            "Profile enable command succeeded, but modem SIM power-cycle failed: {err}"
-                        );
-                        app.system_event_emitter
-                            .emit_code(
-                                system_event_codes::ESIM_PROFILE_SWITCH_BASEBAND_RECOVERY_FAILED,
-                                system_event_severity::CRITICAL,
-                                system_event_status::FAILED,
-                                event_entity.clone(),
-                                format!("Profile 切换后基带恢复失败: {err}"),
-                            )
-                            .await;
-                        if app
-                            .sms_resync
-                            .request_scan("profile-switch-recovery-failed")
-                        {
-                            info!("Requested SMS resync after failed eSIM profile recovery");
-                        } else {
-                            warn!(
-                                "Failed to request SMS resync after failed eSIM profile recovery"
-                            );
+                        Err(err) => {
+                            bg_app
+                                .system_event_emitter
+                                .emit_code(
+                                    system_event_codes::ESIM_PROFILE_SWITCH_BASEBAND_RECOVERY_FAILED,
+                                    system_event_severity::CRITICAL,
+                                    system_event_status::FAILED,
+                                    bg_event_entity,
+                                    format!("Profile 切换后基带恢复失败: {err}"),
+                                )
+                                .await;
+                            if bg_app
+                                .sms_resync
+                                .request_scan("profile-switch-recovery-failed")
+                            {
+                                info!("Requested SMS resync after failed eSIM profile recovery");
+                            } else {
+                                warn!(
+                                    "Failed to request SMS resync after failed eSIM profile recovery"
+                                );
+                            }
                         }
                     }
+                } else {
+                    modem_manager::record_restart_step(
+                        "启用 eSIM Profile",
+                        "error",
+                        Some(data.msg.clone()),
+                    );
+                    bg_app
+                        .system_event_emitter
+                        .emit_code(
+                            system_event_codes::ESIM_PROFILE_ENABLE_FAILED,
+                            system_event_severity::WARNING,
+                            system_event_status::FAILED,
+                            bg_event_entity.clone(),
+                            format!("Profile 启用失败: {}", data.msg),
+                        )
+                        .await;
                 }
-            } else {
-                app.system_event_emitter
+            }
+            Err(err) => {
+                let message = err.message();
+                modem_manager::record_restart_step(
+                    "启用 eSIM Profile",
+                    "error",
+                    Some(message.clone()),
+                );
+                bg_app
+                    .system_event_emitter
                     .emit_code(
                         system_event_codes::ESIM_PROFILE_ENABLE_FAILED,
                         system_event_severity::WARNING,
                         system_event_status::FAILED,
-                        event_entity.clone(),
-                        format!("Profile 启用失败: {}", data.msg),
+                        bg_event_entity.clone(),
+                        format!("Profile 启用失败: {message}"),
                     )
                     .await;
             }
-            (
-                StatusCode::OK,
-                Json(ApiResponse::success_with_message(
-                    "Profile enable requested",
-                    data,
-                )),
-            )
         }
-        Err(err) => {
-            let message = err.message();
-            app.system_event_emitter
-                .emit_code(
-                    system_event_codes::ESIM_PROFILE_ENABLE_FAILED,
-                    system_event_severity::WARNING,
-                    system_event_status::FAILED,
-                    event_entity,
-                    format!("Profile 启用失败: {message}"),
-                )
-                .await;
-            esim_error_response::<EsimCommandResponse>(err)
-        }
-    }
+    });
+
+    let response = EsimCommandResponse {
+        code: 0,
+        status: "success".to_string(),
+        action: "enable".to_string(),
+        msg: "Profile enable task started in background".to_string(),
+        data: None,
+    };
+
+    (
+        StatusCode::OK,
+        Json(ApiResponse::success_with_message(
+            "Profile enable requested",
+            response,
+        )),
+    )
 }
 
 /// POST /api/esim/profiles/{iccid}/rename
@@ -695,12 +720,8 @@ pub async fn download_esim_profile_handler(
     }
 
     // 在写卡前，先异步读取一次卡上的所有 profile ICCID 集合，用于后续新卡判定
-    let initial_iccids_opt: Option<std::collections::HashSet<String>> = app
-        .esim_supervisor
-        .get_profiles()
-        .await
-        .ok()
-        .map(|resp| {
+    let initial_iccids_opt: Option<std::collections::HashSet<String>> =
+        app.esim_supervisor.get_profiles().await.ok().map(|resp| {
             resp.profiles
                 .into_iter()
                 .map(|p| crate::utils::normalize_iccid(&p.iccid))
@@ -717,7 +738,13 @@ pub async fn download_esim_profile_handler(
                     if profile.smdp.as_deref().unwrap_or("").trim().is_empty() {
                         profile.smdp = Some(smdp.clone());
                     }
-                    if profile.matching_id.as_deref().unwrap_or("").trim().is_empty() {
+                    if profile
+                        .matching_id
+                        .as_deref()
+                        .unwrap_or("")
+                        .trim()
+                        .is_empty()
+                    {
                         profile.matching_id = Some(matching_id.clone());
                     }
 
@@ -769,7 +796,8 @@ pub async fn download_esim_profile_handler(
                             Err(err) => {
                                 warn!(attempt = attempt, error = ?err, "Failed to get profiles during fallback retry");
                                 if attempt < 4 {
-                                    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                                    tokio::time::sleep(std::time::Duration::from_millis(1500))
+                                        .await;
                                 }
                             }
                         }
@@ -780,14 +808,18 @@ pub async fn download_esim_profile_handler(
                             for p in resp.profiles {
                                 let norm_iccid = crate::utils::normalize_iccid(&p.iccid);
                                 let is_new_profile = !init_iccids.contains(&norm_iccid);
-                                
+
                                 if is_new_profile {
-                                    let needs_cache = match app.database.get_esim_profile_cache(&p.iccid) {
-                                        Ok(Some(cached_entry)) => {
-                                            cached_entry.smdp.as_deref().unwrap_or("").trim().is_empty()
-                                        }
-                                        _ => true,
-                                    };
+                                    let needs_cache =
+                                        match app.database.get_esim_profile_cache(&p.iccid) {
+                                            Ok(Some(cached_entry)) => cached_entry
+                                                .smdp
+                                                .as_deref()
+                                                .unwrap_or("")
+                                                .trim()
+                                                .is_empty(),
+                                            _ => true,
+                                        };
                                     if needs_cache {
                                         let entry = EsimProfileCacheEntry {
                                             iccid: p.iccid.clone(),
@@ -804,7 +836,9 @@ pub async fn download_esim_profile_handler(
                                             mnc: p.mnc.clone(),
                                             updated_at: chrono::Utc::now().to_rfc3339(),
                                         };
-                                        if let Err(err) = app.database.upsert_esim_profile_cache(&entry) {
+                                        if let Err(err) =
+                                            app.database.upsert_esim_profile_cache(&entry)
+                                        {
                                             warn!(iccid = %entry.iccid, error = %err, "Failed to cache fallback eSIM profile to database");
                                         } else {
                                             cached_fallback_iccid = Some(p.iccid.clone());
@@ -836,18 +870,20 @@ pub async fn download_esim_profile_handler(
                 }
             } else {
                 let msg = data.msg.clone();
-                let is_refused = msg.contains("MatchingID is refused") || 
-                                 msg.contains("es9p_initiate_authentication") ||
-                                 msg.contains("es10b_load_bound_profile_package") ||
-                                 data.data.as_ref()
-                                     .map(|v| {
-                                         let s = v.to_string();
-                                         s.contains("MatchingID is refused") ||
-                                         s.contains("es9p_initiate_authentication") ||
-                                         s.contains("es10b_load_bound_profile_package")
-                                     })
-                                     .unwrap_or(false);
-                
+                let is_refused = msg.contains("MatchingID is refused")
+                    || msg.contains("es9p_initiate_authentication")
+                    || msg.contains("es10b_load_bound_profile_package")
+                    || data
+                        .data
+                        .as_ref()
+                        .map(|v| {
+                            let s = v.to_string();
+                            s.contains("MatchingID is refused")
+                                || s.contains("es9p_initiate_authentication")
+                                || s.contains("es10b_load_bound_profile_package")
+                        })
+                        .unwrap_or(false);
+
                 if is_refused {
                     info!("MatchingID is refused, attempting to bind matching info to the profile if it exists");
                     let mut cached_fallback_iccid = None;
@@ -907,7 +943,10 @@ pub async fn download_esim_profile_handler(
             }
             (
                 StatusCode::OK,
-                Json(ApiResponse::success_with_message("Profile downloaded", data)),
+                Json(ApiResponse::success_with_message(
+                    "Profile downloaded",
+                    data,
+                )),
             )
         }
         Err(err) => {
@@ -1965,8 +2004,7 @@ pub async fn restart_baseband_handler(State(app): State<AppState>) -> impl IntoR
         Err(e) => (
             StatusCode::OK,
             Json(ApiResponse::<BasebandRestartResponse>::error(format!(
-                "重启基带失败：{}",
-                e
+                "重启基带失败：{e}",
             ))),
         ),
     }
@@ -3819,12 +3857,9 @@ pub async fn test_automation_task_handler(
 ) -> (StatusCode, Json<ApiResponse<serde_json::Value>>) {
     let config = app_state.config_manager.get_automation_config();
     let task = config.tasks.iter().find(|t| t.id == task_id).cloned();
-    
+
     let Some(task) = task else {
-        return (
-            StatusCode::OK,
-            Json(ApiResponse::error("自动化任务不存在")),
-        );
+        return (StatusCode::OK, Json(ApiResponse::error("自动化任务不存在")));
     };
 
     tokio::spawn(async move {
@@ -3839,7 +3874,9 @@ pub async fn test_automation_task_handler(
             Some(h) => h,
             None => {
                 let err_msg = format!("未找到该任务类型的处理器: {}", task_type);
-                let _ = app_state.database.insert_automation_log(&task.id, &task.name, task_type, "failed", &err_msg);
+                let _ = app_state
+                    .database
+                    .insert_automation_log(&task.id, &task.name, task_type, "failed", &err_msg);
                 return;
             }
         };
@@ -3850,7 +3887,12 @@ pub async fn test_automation_task_handler(
             crate::config::AutomationAction::RebootDevice { delay_seconds } => {
                 serde_json::json!({ "delay_seconds": delay_seconds })
             }
-            crate::config::AutomationAction::SendSms { phone_number, content, random_delay_seconds, retry_limit } => {
+            crate::config::AutomationAction::SendSms {
+                phone_number,
+                content,
+                random_delay_seconds,
+                retry_limit,
+            } => {
                 delay_secs = u64::from(random_delay_seconds.unwrap_or(0));
                 serde_json::json!({
                     "phone_number": phone_number,
@@ -3863,8 +3905,9 @@ pub async fn test_automation_task_handler(
 
         let result = tokio::time::timeout(
             tokio::time::Duration::from_secs(60 + delay_secs),
-            handler.execute(&app_state, &params)
-        ).await;
+            handler.execute(&app_state, &params),
+        )
+        .await;
 
         let (status, detail) = match result {
             Ok(Ok(_)) => ("success", "执行成功".to_string()),
@@ -3872,7 +3915,9 @@ pub async fn test_automation_task_handler(
             Err(_) => ("failed", "执行超时 (超过60秒限制)".to_string()),
         };
 
-        let _ = app_state.database.insert_automation_log(&task.id, &task.name, task_type, status, &detail);
+        let _ = app_state
+            .database
+            .insert_automation_log(&task.id, &task.name, task_type, status, &detail);
 
         let event = crate::notification::AutomationEvent {
             task_id: task.id.clone(),
@@ -3883,12 +3928,18 @@ pub async fn test_automation_task_handler(
             timestamp: crate::db::beijing_sms_now_string(),
         };
 
-        let _ = app_state.notification_sender.forward_automation_event(&event).await;
+        let _ = app_state
+            .notification_sender
+            .forward_automation_event(&event)
+            .await;
     });
 
     (
         StatusCode::OK,
-        Json(ApiResponse::success_with_message("任务已在后台下发立即执行", json!({}))),
+        Json(ApiResponse::success_with_message(
+            "任务已在后台下发立即执行",
+            json!({}),
+        )),
     )
 }
 
