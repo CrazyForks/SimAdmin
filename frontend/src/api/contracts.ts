@@ -159,8 +159,8 @@ export interface SimInfo {
   puk2_retries?: number
   carrier_config: string
   carrier_config_revision: string
-  sms_used?: number
-  sms_total?: number
+  sms_used?: number | null
+  sms_total?: number | null
 }
 
 export interface UpdateSimCacheRequest {
